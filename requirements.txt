@@ -1,8 +1,6 @@
-fastapi==0.114.2
+fastapi==0.115.2
 uvicorn==0.30.6
-gunicorn==22.0.0
 SQLAlchemy==2.0.34
 psycopg2-binary==2.9.9
 pydantic==2.9.2
 python-dateutil==2.9.0.post0
-pytz==2024.1

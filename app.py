@@ -1,6 +1,7 @@
+# app.py
 import os
 from datetime import datetime, date, time as dtime
-from typing import Optional
+from typing import List
 
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field, field_validator
@@ -12,22 +13,26 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
 from sqlalchemy.exc import IntegrityError
 
+
 # ============================
 # Config / DB
 # ============================
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL non impostata (Render → Settings → Environment).")
+    raise RuntimeError(
+        "DATABASE_URL non impostata (Render → Service → Settings → Environment)."
+    )
 
-# Render dà spesso "postgres://..." → servono gli adattamenti per SQLAlchemy:
+# Render spesso espone postgres://; per SQLAlchemy 2 serve il driver esplicito
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
 
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,         # evita connessioni zombie
-    pool_size=5, max_overflow=20
+    pool_pre_ping=True,   # evita connessioni zombie
+    pool_size=5,
+    max_overflow=20,
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 Base = declarative_base()
@@ -60,11 +65,11 @@ class Reservation(Base):
 
     restaurant = relationship("Restaurant", back_populates="reservations")
 
-    # Idempotenza: stessa prenotazione non può essere inserita due volte
+    # Idempotenza: impedisce duplicati identici
     __table_args__ = (
         UniqueConstraint(
             "restaurant_id", "customer_name", "day", "time",
-            name="uq_reservation_unique"
+            name="uq_reservation_unique",
         ),
     )
 
@@ -82,7 +87,7 @@ class ReservationIn(BaseModel):
 
     @field_validator("day")
     @classmethod
-    def day_must_be_future(cls, v: date) -> date:
+    def day_must_be_today_or_future(cls, v: date) -> date:
         if v < date.today():
             raise ValueError("La data deve essere oggi o futura.")
         return v
@@ -107,6 +112,7 @@ class ReservationOut(BaseModel):
 
 app = FastAPI(title="Ristorante API")
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -117,8 +123,13 @@ def get_db():
 
 @app.on_event("startup")
 def on_startup() -> None:
-    # crea le tabelle se non esistono (evita crash al primo deploy)
+    # crea le tabelle alla prima esecuzione
     Base.metadata.create_all(bind=engine)
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 
 @app.get("/")
@@ -146,7 +157,7 @@ def create_reservation(payload: ReservationIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="Prenotazione già esistente.")
 
 
-@app.get("/reservations/{restaurant_id}", response_model=list[ReservationOut])
+@app.get("/reservations/{restaurant_id}", response_model=List[ReservationOut])
 def list_reservations(restaurant_id: int, db: Session = Depends(get_db)):
     rows = (
         db.query(Reservation)
